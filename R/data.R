@@ -26,18 +26,7 @@ load_roller_current <- function() {
   if (is.null(.cache$roller)) {
     path <- gcs_path("roller/parsed/v1/role_persons/2026-04-17.parquet")
     r <- read_parquet(path) |> as.data.table()
-    if (!"role_code" %in% names(r) && "roletype_kode" %in% names(r)) {
-      setnames(r, "roletype_kode", "role_code")
-    }
-    if (!"role_code" %in% names(r) && "rolletype_kode" %in% names(r)) {
-      setnames(r, "rolletype_kode", "role_code")
-    }
-    if (!"person_id" %in% names(r) && "personid" %in% names(r)) {
-      setnames(r, "personid", "person_id")
-    }
-    if (!"person_id" %in% names(r) && "identifikator" %in% names(r)) {
-      setnames(r, "identifikator", "person_id")
-    }
+    if ("org_nr" %in% names(r)) setnames(r, "org_nr", "orgnr")
     if (!"orgnr" %in% names(r) && "organisasjonsnummer" %in% names(r)) {
       setnames(r, "organisasjonsnummer", "orgnr")
     }
