@@ -4,6 +4,11 @@ library(jsonlite)
 library(stringr)
 library(logger)
 
+options(error = function() {
+  traceback(2)
+  if (!interactive()) quit(status = 1, save = "no")
+})
+
 source("R/utils.R")
 source("R/scoring.R")
 source("R/data.R")

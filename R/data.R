@@ -1,39 +1,50 @@
 library(data.table)
 library(arrow)
-library(jsonlite)
+library(dplyr)
+library(stringr)
 
 .cache <- new.env(parent = emptyenv())
 
+`%||%` <- function(a, b) if (is.null(a) || length(a) == 0 || is.na(a)) b else a
+
 load_finstat <- function() {
   if (is.null(.cache$finstat)) {
-    fs <- read_parquet(
-      gcs_path("finstat/state/snapshots.parquet"),
-      col_select = c("organisasjonsnummer", "Regnskapsar",
-                     "Regnskapsversjon", "RegnskapstypeKode", "SumEiendeler")
-    )
-    setDT(fs)
-    fs <- fs[Regnskapsversjon == "U" & RegnskapstypeKode == "R"]
-    setnames(fs, c("organisasjonsnummer", "Regnskapsar", "SumEiendeler"),
-             c("orgnr", "yr", "eiendeler"))
+    fs <- open_dataset(gcs_path("finstat/state/snapshots.parquet")) |>
+      filter(Regnskapsversjon == "U", RegnskapstypeKode == "R") |>
+      select(orgnr = organisasjonsnummer,
+             yr = Regnskapsar,
+             eiendeler = SumEiendeler) |>
+      collect() |>
+      as.data.table()
     setkey(fs, orgnr, yr)
-    .cache$finstat <- fs[, .(orgnr, yr, eiendeler)]
+    .cache$finstat <- fs
   }
   .cache$finstat
 }
 
 load_roller_current <- function() {
   if (is.null(.cache$roller)) {
-    latest <- "roller/parsed/v1/role_persons/2026-04-17.parquet"
-    r <- read_parquet(gcs_path(latest))
-    setDT(r)
-    name_col <- intersect(c("role_code", "roletype_kode", "rolletype_kode"), names(r))[1]
-    if (!is.na(name_col) && name_col != "role_code") setnames(r, name_col, "role_code")
-    person_col <- intersect(c("person_id", "personid", "identifikator"), names(r))[1]
-    if (!is.na(person_col) && person_col != "person_id") setnames(r, person_col, "person_id")
-    orgnr_col <- intersect(c("orgnr", "organisasjonsnummer"), names(r))[1]
-    if (!is.na(orgnr_col) && orgnr_col != "orgnr") setnames(r, orgnr_col, "orgnr")
+    path <- gcs_path("roller/parsed/v1/role_persons/2026-04-17.parquet")
+    r <- read_parquet(path) |> as.data.table()
+    if (!"role_code" %in% names(r) && "roletype_kode" %in% names(r)) {
+      setnames(r, "roletype_kode", "role_code")
+    }
+    if (!"role_code" %in% names(r) && "rolletype_kode" %in% names(r)) {
+      setnames(r, "rolletype_kode", "role_code")
+    }
+    if (!"person_id" %in% names(r) && "personid" %in% names(r)) {
+      setnames(r, "personid", "person_id")
+    }
+    if (!"person_id" %in% names(r) && "identifikator" %in% names(r)) {
+      setnames(r, "identifikator", "person_id")
+    }
+    if (!"orgnr" %in% names(r) && "organisasjonsnummer" %in% names(r)) {
+      setnames(r, "organisasjonsnummer", "orgnr")
+    }
+    cols <- intersect(c("orgnr", "person_id", "role_code"), names(r))
+    r <- r[, ..cols]
     setkey(r, orgnr)
-    .cache$roller <- r[, .(orgnr, person_id, role_code)]
+    .cache$roller <- r
   }
   .cache$roller
 }
@@ -43,35 +54,35 @@ load_aksjeeierbok_year <- function(yr) {
   if (is.null(.cache[[key]])) {
     path <- gcs_path(paste0("aksjeeierbok/cdc/changelog/", yr, ".parquet"))
     a <- tryCatch(
-      read_parquet(path, col_select = c("orgnr", "event_type", "details_json")),
+      open_dataset(path) |>
+        filter(event_type != "disappeared") |>
+        select(orgnr, details_json) |>
+        collect() |>
+        as.data.table(),
       error = function(e) NULL
     )
-    if (is.null(a)) {
+    if (is.null(a) || nrow(a) == 0) {
       .cache[[key]] <- data.table()
       return(.cache[[key]])
     }
-    setDT(a)
-    a <- a[event_type != "disappeared"]
     a[, details_str := vapply(details_json, function(x) {
       if (is.raw(x)) rawToChar(x) else as.character(x)
     }, character(1))]
-    a[, holder_id := str_match(details_str, '"shareholder_id":"?([^",}]*)"?')[,2]]
-    a[, holder_name := str_match(details_str, '"shareholder_name":"?([^",}]*)"?')[,2]]
-    a[, ownership_pct := as.numeric(str_match(details_str, '"curr_ownership_pct":([^",}]*)')[,2])]
-    a[, details_json := NULL]
-    a[, details_str := NULL]
-    a[, event_type := NULL]
+    a[, holder_id := str_match(details_str, '"shareholder_id":"?([^",}]*)"?')[, 2]]
+    a[, holder_name := str_match(details_str, '"shareholder_name":"?([^",}]*)"?')[, 2]]
+    a[, ownership_pct := as.numeric(str_match(details_str, '"curr_ownership_pct":([^",}]*)')[, 2])]
+    a[, c("details_json", "details_str") := NULL]
     setkey(a, orgnr)
     .cache[[key]] <- a
   }
   .cache[[key]]
 }
 
-`%||%` <- function(a, b) if (is.null(a) || length(a) == 0 || is.na(a)) b else a
-
 get_holders <- function(target_orgnr, target_yr) {
   akb <- load_aksjeeierbok_year(target_yr)
-  if (nrow(akb) == 0) return(data.table(holder_id = character(), holder_name = character(), ownership_pct = numeric()))
+  if (nrow(akb) == 0) {
+    return(data.table(holder_id = character(), holder_name = character(), ownership_pct = numeric()))
+  }
   akb[orgnr == target_orgnr, .(holder_id, holder_name, ownership_pct)]
 }
 
