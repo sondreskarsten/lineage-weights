@@ -30,8 +30,7 @@ main <- function() {
   unique_yrs <- sort(unique(edges$event_yr))
   log_info("edges span {min(unique_yrs)}..{max(unique_yrs)}")
 
-  output <- vector("list", nrow(edges))
-  row_ix <- 1L
+  dir.create("/tmp/year_batches", showWarnings = FALSE)
 
   for (yr in unique_yrs) {
     batch <- edges[event_yr == yr]
@@ -40,6 +39,7 @@ main <- function() {
     load_aksjeeierbok_year(yr)
     log_info("  pre-yr akb: {nrow(.cache[[paste0('akb_', yr-1)]])} rows; post-yr: {nrow(.cache[[paste0('akb_', yr)]])} rows")
 
+    yr_output <- vector("list", nrow(batch))
     for (i in seq_len(nrow(batch))) {
       e <- batch[i]
       pre_holders  <- get_holders(e$predecessor_orgnr, yr - 1)
@@ -53,39 +53,43 @@ main <- function() {
       st <- score_tillitsvalgt(pre_roles, post_roles)
       sr <- score_regnskap(pre_eiendeler, post_eiendeler)
 
-      output[[row_ix]] <- data.table(
-        predecessor_orgnr = e$predecessor_orgnr,
-        successor_orgnr   = e$successor_orgnr,
+      yr_output[[i]] <- data.table(
+        predecessor_orgnr = as.character(e$predecessor_orgnr),
+        successor_orgnr   = as.character(e$successor_orgnr),
         event_date        = e$event_date,
-        event_type        = e$event_type,
-        kid               = e$kid,
-        confidence        = e$confidence,
-        aksjonaer_score   = sa$score,
-        tillitsvalgt_score = st$score,
-        regnskap_score    = sr$score,
-        aksjonaer_pre_top = sa$pre_top,
-        aksjonaer_post_top = sa$post_top,
-        tillitsvalgt_pre_roles  = st$pre_roles,
-        tillitsvalgt_post_roles = st$post_roles,
-        regnskap_pre_eiendeler  = sr$pre,
-        regnskap_post_eiendeler = sr$post,
+        event_type        = as.character(e$event_type),
+        kid               = as.character(e$kid),
+        confidence        = as.numeric(e$confidence),
+        aksjonaer_score   = as.numeric(sa$score),
+        tillitsvalgt_score = as.numeric(st$score),
+        regnskap_score    = as.numeric(sr$score),
+        aksjonaer_pre_top = as.character(sa$pre_top),
+        aksjonaer_post_top = as.character(sa$post_top),
+        tillitsvalgt_pre_roles  = as.character(st$pre_roles),
+        tillitsvalgt_post_roles = as.character(st$post_roles),
+        regnskap_pre_eiendeler  = as.numeric(sr$pre),
+        regnskap_post_eiendeler = as.numeric(sr$post),
         methodology_version = METHODOLOGY_VERSION,
         computed_at         = Sys.time()
       )
-      row_ix <- row_ix + 1L
     }
+    yr_dt <- rbindlist(yr_output, use.names = TRUE, fill = TRUE)
+    write_parquet(yr_dt, paste0("/tmp/year_batches/", yr, ".parquet"))
+    log_info("  wrote year {yr}: {nrow(yr_dt)} rows")
+
     .cache[[paste0("akb_", yr - 1)]] <- NULL
     if (yr > min(unique_yrs)) .cache[[paste0("akb_", yr - 2)]] <- NULL
     gc(verbose = FALSE)
 
     if (yr %% 5 == 0) {
-      done <- row_ix - 1L
-      log_info("  progress: {done}/{nrow(edges)} ({round(100*done/nrow(edges),1)}%), elapsed {round(difftime(Sys.time(), t0, units='mins'), 1)}min")
+      log_info("  elapsed {round(difftime(Sys.time(), t0, units='mins'), 1)}min")
     }
   }
 
-  log_info("concatenating {length(output)} rows")
-  result <- rbindlist(output, use.names = TRUE, fill = TRUE)
+  log_info("reading back year batches")
+  year_files <- list.files("/tmp/year_batches", full.names = TRUE, pattern = "\\.parquet$")
+  batches <- lapply(year_files, read_parquet)
+  result <- rbindlist(batches, use.names = TRUE, fill = TRUE)
   log_info("result: {nrow(result)} rows, {ncol(result)} cols")
 
   out_path <- gcs_path("entity-lineage/weighted_edges.parquet")

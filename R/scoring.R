@@ -17,9 +17,9 @@ score_aksjonaer <- function(pre_holders, post_holders) {
   joined[is.na(pct.post), pct.post := 0]
   l1 <- sum(abs(joined$pct.pre - joined$pct.post))
   list(
-    score = pmax(0, 1 - l1 / 2),
-    pre_top = jsonlite::toJSON(pre_agg, auto_unbox = TRUE),
-    post_top = jsonlite::toJSON(post_agg, auto_unbox = TRUE)
+    score = max(0, 1 - l1 / 2),
+    pre_top = as.character(jsonlite::toJSON(pre_agg, auto_unbox = TRUE)),
+    post_top = as.character(jsonlite::toJSON(post_agg, auto_unbox = TRUE))
   )
 }
 
@@ -50,8 +50,8 @@ score_tillitsvalgt <- function(pre_roles, post_roles) {
   score <- if (sum(maxs) == 0) NA_real_ else sum(mins) / sum(maxs)
   list(
     score = score,
-    pre_roles = jsonlite::toJSON(pre, auto_unbox = TRUE),
-    post_roles = jsonlite::toJSON(post, auto_unbox = TRUE)
+    pre_roles = as.character(jsonlite::toJSON(pre, auto_unbox = TRUE)),
+    post_roles = as.character(jsonlite::toJSON(post, auto_unbox = TRUE))
   )
 }
 
@@ -61,7 +61,7 @@ score_regnskap <- function(pre_eiendeler, post_eiendeler) {
     return(list(score = NA_real_, pre = pre_eiendeler, post = post_eiendeler))
   }
   list(
-    score = pmin(1, pmin(pre_eiendeler, post_eiendeler) / pmax(pre_eiendeler, post_eiendeler)),
+    score = min(1, min(pre_eiendeler, post_eiendeler) / max(pre_eiendeler, post_eiendeler)),
     pre = pre_eiendeler,
     post = post_eiendeler
   )
