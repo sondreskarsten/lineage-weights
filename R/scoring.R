@@ -41,10 +41,12 @@ score_tillitsvalgt <- function(pre_roles, post_roles) {
   all_keys <- union(pre$key, post$key)
   pre_w <- setNames(pre$w, pre$key)
   post_w <- setNames(post$w, post$key)
-  mins <- pmin(pre_w[all_keys] |> replace(is.na, 0),
-               post_w[all_keys] |> replace(is.na, 0))
-  maxs <- pmax(pre_w[all_keys] |> replace(is.na, 0),
-               post_w[all_keys] |> replace(is.na, 0))
+  pre_vec <- as.numeric(pre_w[all_keys])
+  post_vec <- as.numeric(post_w[all_keys])
+  pre_vec[is.na(pre_vec)] <- 0
+  post_vec[is.na(post_vec)] <- 0
+  mins <- pmin(pre_vec, post_vec)
+  maxs <- pmax(pre_vec, post_vec)
   score <- if (sum(maxs) == 0) NA_real_ else sum(mins) / sum(maxs)
   list(
     score = score,
